@@ -1,0 +1,1386 @@
+<!doctype html>
+<html lang="ko" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shooting Game</title>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      margin-bottom: -37px;
+    }
+    
+    #gameCanvas {
+      display: block;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    }
+    
+    .game-ui {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: white;
+      font-family: Arial, sans-serif;
+      z-index: 10;
+    }
+    
+    .health-bar-container {
+      width: 200px;
+      height: 24px;
+      background-color: rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid #fff;
+    }
+    
+    .health-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #ff4444, #ff6b6b);
+      transition: width 0.3s ease;
+    }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+ </head>
+ <body class="h-full">
+  <div class="w-full h-full relative">
+   <canvas id="gameCanvas"></canvas>
+   <div class="game-ui" id="gameUI" style="display: none;">
+    <h1 id="gameTitle" style="font-size: 28px; margin: 0 0 10px 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">슈팅 게임</h1>
+    <div style="margin-bottom: 8px;"><span id="healthLabel" style="font-size: 16px; font-weight: bold;">체력:</span> <span id="healthValue" style="font-size: 16px; margin-left: 5px;">100</span>
+    </div>
+    <div class="health-bar-container">
+     <div id="healthBar" class="health-bar" style="width: 100%;"></div>
+    </div>
+    <div style="margin-top: 15px; margin-bottom: 8px;"><span style="font-size: 16px; font-weight: bold;">레벨: <span id="levelValue">1</span></span>
+    </div>
+    <div class="health-bar-container" style="background-color: rgba(100, 150, 255, 0.3);">
+     <div id="expBar" style="height: 100%; background: linear-gradient(90deg, #4488ff, #66aaff); transition: width: 0.3s ease; width: 0%;"></div>
+    </div>
+    <div id="playerLabel" style="margin-top: 10px; font-size: 14px; opacity: 0.8;">
+     플레이어
+    </div>
+   </div>
+   <div style="position: absolute; top: 20px; right: 20px; color: white; font-family: Arial, sans-serif; z-index: 10; display: flex; align-items: center; gap: 15px;" id="survivalTimeUI">
+    <div id="survivalTime" style="font-size: 24px; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">
+     생존 시간: 0:00
+    </div><button id="pauseButton" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: transform 0.2s;">⏸️ 정지</button>
+   </div>
+  </div>
+  <script>
+    const defaultConfig = {
+      game_title: "퀀텀 어드벤처",
+      player_label: "플레이어",
+      health_label: "체력:",
+      survival_label: "생존 시간:",
+      background_color: "#1a1a2e",
+      player_color: "#00d4ff",
+      enemy_color: "#ff4444",
+      bullet_color: "#ffff00",
+      text_color: "#ffffff"
+    };
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    const player = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      size: 20,
+      speed: 5,
+      health: 100,
+      maxHealth: 100
+    };
+
+    const keys = {};
+    const enemies = [];
+    const bullets = [];
+    const orbs = [];
+    const healthOrbs = [];
+    let lastEnemySpawn = 0;
+    let lastDamageTime = 0;
+    const damageInterval = 1000;
+    let gameStartTime = Date.now();
+    let survivalSeconds = 0;
+    let pausedTime = 0;
+    let pauseStartTime = 0;
+    let lastAutoShoot = 0;
+    const autoShootInterval = 1000;
+    let enemySpawnInterval = 2000;
+    let lastSpawnRateUpdate = Date.now();
+    let playerLevel = 1;
+    let playerExp = 0;
+    let expToNextLevel = 10;
+    let levelUpMessageTime = 0;
+    let showLevelUpText = false;
+    let gamePaused = false;
+    let showLevelUpChoice = false;
+    let collectRadius = 90;
+    let attackSpeedBonus = 0;
+    let attackDamage = 10;
+    let expMultiplier = 1.0;
+    let gameOver = false;
+    let gameStarted = false;
+    let showStartScreen = true;
+    let finalSurvivalTime = '';
+    let currentUpgradeOptions = [];
+    let showTutorial = false;
+    let tutorialPage = 0;
+
+    window.addEventListener('keydown', (e) => {
+      keys[e.key.toLowerCase()] = true;
+      
+      if (showLevelUpChoice) {
+        if (e.key === '1') {
+          selectUpgrade(0);
+        } else if (e.key === '2') {
+          selectUpgrade(1);
+        } else if (e.key === '3') {
+          selectUpgrade(2);
+        }
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      keys[e.key.toLowerCase()] = false;
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+      let isOverButton = false;
+      
+      if (showTutorial) {
+        if (tutorialPage < 2) {
+          const nextButtonWidth = 150;
+          const nextButtonHeight = 50;
+          const nextButtonX = canvas.width / 2 + 20;
+          const nextButtonY = canvas.height - 100;
+          
+          if (mouseX >= nextButtonX && mouseX <= nextButtonX + nextButtonWidth &&
+              mouseY >= nextButtonY && mouseY <= nextButtonY + nextButtonHeight) {
+            isOverButton = true;
+          }
+        }
+        
+        if (tutorialPage > 0) {
+          const prevButtonWidth = 150;
+          const prevButtonHeight = 50;
+          const prevButtonX = canvas.width / 2 - 170;
+          const prevButtonY = canvas.height - 100;
+          
+          if (mouseX >= prevButtonX && mouseX <= prevButtonX + prevButtonWidth &&
+              mouseY >= prevButtonY && mouseY <= prevButtonY + prevButtonHeight) {
+            isOverButton = true;
+          }
+        }
+        
+        if (tutorialPage === 2) {
+          const closeButtonWidth = 200;
+          const closeButtonHeight = 50;
+          const closeButtonX = canvas.width / 2 - closeButtonWidth / 2;
+          const closeButtonY = canvas.height - 100;
+          
+          if (mouseX >= closeButtonX && mouseX <= closeButtonX + closeButtonWidth &&
+              mouseY >= closeButtonY && mouseY <= closeButtonY + closeButtonHeight) {
+            isOverButton = true;
+          }
+        }
+      } else if (showStartScreen) {
+        const buttonWidth = 280;
+        const buttonHeight = 75;
+        const buttonX = canvas.width / 2 - buttonWidth / 2;
+        const buttonY = canvas.height / 2 - 20;
+        
+        const tutorialTextY = canvas.height / 2 + 85;
+        const tutorialButtonWidth = 200;
+        const tutorialButtonX = canvas.width / 2 - tutorialButtonWidth / 2;
+        const tutorialButtonHeight = 30;
+        
+        if ((mouseX >= buttonX && mouseX <= buttonX + buttonWidth &&
+            mouseY >= buttonY && mouseY <= buttonY + buttonHeight) ||
+            (mouseX >= tutorialButtonX && mouseX <= tutorialButtonX + tutorialButtonWidth &&
+            mouseY >= tutorialTextY - tutorialButtonHeight/2 && mouseY <= tutorialTextY + tutorialButtonHeight/2)) {
+          isOverButton = true;
+        }
+      } else if (gameOver) {
+        const buttonWidth = 200;
+        const buttonHeight = 60;
+        const buttonX = canvas.width / 2 - buttonWidth / 2;
+        const buttonY = canvas.height / 2 + 60;
+        
+        if (mouseX >= buttonX && mouseX <= buttonX + buttonWidth &&
+            mouseY >= buttonY && mouseY <= buttonY + buttonHeight) {
+          isOverButton = true;
+        }
+      } else if (showLevelUpChoice) {
+        const boxWidth = 200;
+        const boxHeight = 120;
+        const boxY = canvas.height / 2 - 30;
+        const spacing = 20;
+        const totalWidth = boxWidth * 3 + spacing * 2;
+        const startX = canvas.width / 2 - totalWidth / 2;
+        
+        for (let i = 0; i < 3; i++) {
+          const boxX = startX + i * (boxWidth + spacing);
+          if (mouseX >= boxX && mouseX <= boxX + boxWidth &&
+              mouseY >= boxY && mouseY <= boxY + boxHeight) {
+            isOverButton = true;
+            break;
+          }
+        }
+      }
+      
+      canvas.style.cursor = isOverButton ? 'pointer' : 'default';
+    });
+
+    // 정지 버튼 이벤트 리스너
+    document.getElementById('pauseButton').addEventListener('click', () => {
+      gamePaused = !gamePaused;
+      const pauseButton = document.getElementById('pauseButton');
+      if (gamePaused) {
+        pauseStartTime = Date.now();
+        pauseButton.textContent = '▶️ 계속';
+        pauseButton.style.background = 'linear-gradient(135deg, #56ab2f 0%, #a8e063 100%)';
+      } else {
+        pausedTime += Date.now() - pauseStartTime;
+        pauseButton.textContent = '⏸️ 정지';
+        pauseButton.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+      }
+    });
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+      
+      // 튜토리얼이 열려있을 때
+      if (showTutorial) {
+        // 다음 버튼 (오른쪽)
+        if (tutorialPage < 2) {
+          const nextButtonWidth = 150;
+          const nextButtonHeight = 50;
+          const nextButtonX = canvas.width / 2 + 20;
+          const nextButtonY = canvas.height - 100;
+          
+          if (mouseX >= nextButtonX && mouseX <= nextButtonX + nextButtonWidth &&
+              mouseY >= nextButtonY && mouseY <= nextButtonY + nextButtonHeight) {
+            tutorialPage++;
+            return;
+          }
+        }
+        
+        // 이전 버튼 (왼쪽)
+        if (tutorialPage > 0) {
+          const prevButtonWidth = 150;
+          const prevButtonHeight = 50;
+          const prevButtonX = canvas.width / 2 - 170;
+          const prevButtonY = canvas.height - 100;
+          
+          if (mouseX >= prevButtonX && mouseX <= prevButtonX + prevButtonWidth &&
+              mouseY >= prevButtonY && mouseY <= prevButtonY + prevButtonHeight) {
+            tutorialPage--;
+            return;
+          }
+        }
+        
+        // 닫기 버튼 (마지막 페이지에서만)
+        if (tutorialPage === 2) {
+          const closeButtonWidth = 200;
+          const closeButtonHeight = 50;
+          const closeButtonX = canvas.width / 2 - closeButtonWidth / 2;
+          const closeButtonY = canvas.height - 100;
+          
+          if (mouseX >= closeButtonX && mouseX <= closeButtonX + closeButtonWidth &&
+              mouseY >= closeButtonY && mouseY <= closeButtonY + closeButtonHeight) {
+            showTutorial = false;
+            tutorialPage = 0;
+            return;
+          }
+          return; // 마지막 페이지에서는 여기서 반환
+        }
+      }
+      
+      // 시작 화면일 때
+      if (showStartScreen) {
+        // 게임 시작 버튼
+        const buttonWidth = 280;
+        const buttonHeight = 75;
+        const buttonX = canvas.width / 2 - buttonWidth / 2;
+        const buttonY = canvas.height / 2 - 20;
+        
+        if (mouseX >= buttonX && mouseX <= buttonX + buttonWidth &&
+            mouseY >= buttonY && mouseY <= buttonY + buttonHeight) {
+          startGame();
+          return;
+        }
+        
+        // 게임 방법 보기 버튼
+        const tutorialTextY = canvas.height / 2 + 85;
+        const tutorialButtonWidth = 200;
+        const tutorialButtonX = canvas.width / 2 - tutorialButtonWidth / 2;
+        const tutorialButtonHeight = 30;
+        
+        if (mouseX >= tutorialButtonX && mouseX <= tutorialButtonX + tutorialButtonWidth &&
+            mouseY >= tutorialTextY - tutorialButtonHeight/2 && mouseY <= tutorialTextY + tutorialButtonHeight/2) {
+          showTutorial = true;
+          tutorialPage = 0;
+          return;
+        }
+        
+        return;
+      }
+      
+      if (gameOver) {
+        const buttonWidth = 200;
+        const buttonHeight = 60;
+        const buttonX = canvas.width / 2 - buttonWidth / 2;
+        const buttonY = canvas.height / 2 + 60;
+        
+        if (mouseX >= buttonX && mouseX <= buttonX + buttonWidth &&
+            mouseY >= buttonY && mouseY <= buttonY + buttonHeight) {
+          resetGame();
+        }
+        return;
+      }
+      
+      if (showLevelUpChoice) {
+        const boxWidth = 200;
+        const boxHeight = 120;
+        const boxY = canvas.height / 2 - 30;
+        const spacing = 20;
+        const totalWidth = boxWidth * 3 + spacing * 2;
+        const startX = canvas.width / 2 - totalWidth / 2;
+        
+        for (let i = 0; i < 3; i++) {
+          const boxX = startX + i * (boxWidth + spacing);
+          if (mouseX >= boxX && mouseX <= boxX + boxWidth &&
+              mouseY >= boxY && mouseY <= boxY + boxHeight) {
+            selectUpgrade(i);
+            return;
+          }
+        }
+        return;
+      }
+    });
+
+    function startGame() {
+      showStartScreen = false;
+      gameStarted = true;
+      gameStartTime = Date.now();
+      document.getElementById('gameUI').style.display = 'block';
+      document.getElementById('survivalTimeUI').style.display = 'block';
+    }
+    
+    function hideUIOnStartScreen() {
+      if (showStartScreen || showTutorial) {
+        document.getElementById('gameUI').style.display = 'none';
+        document.getElementById('survivalTimeUI').style.display = 'none';
+      }
+    }
+
+    function autoShoot() {
+      if (enemies.length === 0) return;
+      
+      let closestEnemy = enemies[0];
+      let minDistance = Math.sqrt(
+        Math.pow(player.x - closestEnemy.x, 2) + Math.pow(player.y - closestEnemy.y, 2)
+      );
+      
+      enemies.forEach(enemy => {
+        const distance = Math.sqrt(
+          Math.pow(player.x - enemy.x, 2) + Math.pow(player.y - enemy.y, 2)
+        );
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestEnemy = enemy;
+        }
+      });
+      
+      const angle = Math.atan2(closestEnemy.y - player.y, closestEnemy.x - player.x);
+      bullets.push({
+        x: player.x,
+        y: player.y,
+        vx: Math.cos(angle) * 8,
+        vy: Math.sin(angle) * 8,
+        size: 5
+      });
+    }
+
+    function spawnEnemy() {
+      const side = Math.floor(Math.random() * 4);
+      let x, y;
+      
+      switch(side) {
+        case 0: x = Math.random() * canvas.width; y = -20; break;
+        case 1: x = canvas.width + 20; y = Math.random() * canvas.height; break;
+        case 2: x = Math.random() * canvas.width; y = canvas.height + 20; break;
+        case 3: x = -20; y = Math.random() * canvas.height; break;
+      }
+      
+      // 1분마다 20%씩 체력 증가 계산 (실제 플레이 시간 기준 - 정지 시간 제외)
+      const actualPlayTime = Date.now() - gameStartTime - pausedTime;
+      const oneMinuteIntervals = Math.floor(actualPlayTime / 60000);
+      const healthMultiplier = 1 + (oneMinuteIntervals * 0.20);
+      const baseHealth = 10;
+      const enemyHealth = Math.round(baseHealth * healthMultiplier);
+      
+      enemies.push({
+        x: x,
+        y: y,
+        size: 18,
+        speed: 2,
+        health: enemyHealth,
+        maxHealth: enemyHealth
+      });
+    }
+
+    function updatePlayer() {
+      if (keys['w'] || keys['arrowup']) player.y -= player.speed;
+      if (keys['s'] || keys['arrowdown']) player.y += player.speed;
+      if (keys['a'] || keys['arrowleft']) player.x -= player.speed;
+      if (keys['d'] || keys['arrowright']) player.x += player.speed;
+
+      player.x = Math.max(player.size, Math.min(canvas.width - player.size, player.x));
+      player.y = Math.max(player.size, Math.min(canvas.height - player.size, player.y));
+    }
+
+    function updateEnemies() {
+      const currentTime = Date.now();
+      
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        const enemy = enemies[i];
+        const dx = player.x - enemy.x;
+        const dy = player.y - enemy.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        enemy.x += (dx / distance) * enemy.speed;
+        enemy.y += (dy / distance) * enemy.speed;
+
+        const playerDist = Math.sqrt(
+          Math.pow(player.x - enemy.x, 2) + Math.pow(player.y - enemy.y, 2)
+        );
+        
+        if (playerDist < player.size + enemy.size) {
+          player.health = Math.max(0, player.health - 10);
+          updateHealthDisplay();
+          enemies.splice(i, 1);
+          
+          if (player.health <= 0) {
+            const minutes = Math.floor(survivalSeconds / 60);
+            const seconds = survivalSeconds % 60;
+            finalSurvivalTime = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            gameOver = true;
+            gamePaused = true;
+          }
+        }
+      }
+    }
+
+    function updateBullets() {
+      for (let bulletIndex = bullets.length - 1; bulletIndex >= 0; bulletIndex--) {
+        const bullet = bullets[bulletIndex];
+        bullet.x += bullet.vx;
+        bullet.y += bullet.vy;
+
+        if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+          bullets.splice(bulletIndex, 1);
+          continue;
+        }
+
+        for (let enemyIndex = enemies.length - 1; enemyIndex >= 0; enemyIndex--) {
+          const enemy = enemies[enemyIndex];
+          const dist = Math.sqrt(
+            Math.pow(bullet.x - enemy.x, 2) + Math.pow(bullet.y - enemy.y, 2)
+          );
+          
+          if (dist < bullet.size + enemy.size) {
+            enemy.health -= attackDamage;
+            bullets.splice(bulletIndex, 1);
+            
+            if (enemy.health <= 0) {
+              // 기본 경험치 구슬
+              orbs.push({
+                x: enemy.x,
+                y: enemy.y,
+                size: 6,
+                type: 'exp'
+              });
+              
+              // 5% 확률로 체력 회복 구슬
+              if (Math.random() < 0.05) {
+                healthOrbs.push({
+                  x: enemy.x,
+                  y: enemy.y,
+                  size: 8,
+                  type: 'health'
+                });
+              }
+              
+              enemies.splice(enemyIndex, 1);
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    function updateOrbs() {
+      // 경험치 구슬 업데이트
+      for (let i = orbs.length - 1; i >= 0; i--) {
+        const orb = orbs[i];
+        const dist = Math.sqrt(
+          Math.pow(player.x - orb.x, 2) + Math.pow(player.y - orb.y, 2)
+        );
+        
+        if (dist <= collectRadius) {
+          const dx = player.x - orb.x;
+          const dy = player.y - orb.y;
+          const moveSpeed = 8;
+          
+          orb.x += (dx / dist) * moveSpeed;
+          orb.y += (dy / dist) * moveSpeed;
+          
+          if (dist < player.size + orb.size) {
+            playerExp += Math.round(1 * expMultiplier);
+            orbs.splice(i, 1);
+            
+            if (playerExp >= expToNextLevel) {
+              playerLevel++;
+              playerExp = 0;
+              expToNextLevel += 10;
+              showLevelUpMessage();
+            }
+            
+            updateLevelDisplay();
+          }
+        }
+      }
+      
+      // 체력 회복 구슬 업데이트
+      for (let i = healthOrbs.length - 1; i >= 0; i--) {
+        const orb = healthOrbs[i];
+        const dist = Math.sqrt(
+          Math.pow(player.x - orb.x, 2) + Math.pow(player.y - orb.y, 2)
+        );
+        
+        if (dist <= collectRadius) {
+          const dx = player.x - orb.x;
+          const dy = player.y - orb.y;
+          const moveSpeed = 8;
+          
+          orb.x += (dx / dist) * moveSpeed;
+          orb.y += (dy / dist) * moveSpeed;
+          
+          if (dist < player.size + orb.size) {
+            const healAmount = player.maxHealth * 0.1;
+            player.health = Math.min(player.maxHealth, player.health + healAmount);
+            updateHealthDisplay();
+            healthOrbs.splice(i, 1);
+          }
+        }
+      }
+    }
+
+    function updateHealthDisplay() {
+      const healthValue = document.getElementById('healthValue');
+      const healthBar = document.getElementById('healthBar');
+      
+      healthValue.textContent = Math.round(player.health);
+      healthBar.style.width = (player.health / player.maxHealth * 100) + '%';
+    }
+
+    function showLevelUpMessage() {
+      gamePaused = true;
+      showLevelUpChoice = true;
+      
+      // 5가지 업그레이드 옵션 정의
+      const allUpgrades = [
+        {
+          type: 'health',
+          name: '체력',
+          color: 'rgba(255, 68, 68, 0.3)',
+          borderColor: '#ff4444',
+          weight: 21.25
+        },
+        {
+          type: 'attackSpeed',
+          name: '공속',
+          color: 'rgba(255, 255, 0, 0.3)',
+          borderColor: '#ffff00',
+          weight: 21.25
+        },
+        {
+          type: 'collectRange',
+          name: '획득범위',
+          color: 'rgba(0, 212, 255, 0.3)',
+          borderColor: '#00d4ff',
+          weight: 21.25
+        },
+        {
+          type: 'attackDamage',
+          name: '공격력',
+          color: 'rgba(138, 43, 226, 0.3)',
+          borderColor: '#8a2be2',
+          weight: 21.25
+        },
+        {
+          type: 'expMultiplier',
+          name: '경험치량',
+          color: 'rgba(255, 215, 0, 0.3)',
+          borderColor: '#ffd700',
+          weight: 15
+        }
+      ];
+      
+      function weightedRandomSelect(items, count) {
+        const selected = [];
+        const available = [...items];
+        
+        for (let i = 0; i < count && available.length > 0; i++) {
+          const totalWeight = available.reduce((sum, item) => sum + item.weight, 0);
+          let random = Math.random() * totalWeight;
+          
+          let selectedIndex = 0;
+          for (let j = 0; j < available.length; j++) {
+            random -= available[j].weight;
+            if (random <= 0) {
+              selectedIndex = j;
+              break;
+            }
+          }
+          
+          selected.push(available[selectedIndex]);
+          available.splice(selectedIndex, 1);
+        }
+        
+        return selected;
+      }
+      
+      const selectedUpgrades = weightedRandomSelect(allUpgrades, 3);
+      
+      currentUpgradeOptions = selectedUpgrades.map(upgrade => ({
+        ...upgrade,
+        value: upgrade.type === 'expMultiplier' ? 200 : Math.floor(Math.random() * 11) + 20
+      }));
+    }
+
+    function selectUpgrade(index) {
+      const upgrade = currentUpgradeOptions[index];
+      const value = upgrade.value / 100;
+      
+      if (upgrade.type === 'health') {
+        const healthIncrease = player.maxHealth * value;
+        player.maxHealth += healthIncrease;
+        player.health += healthIncrease;
+        updateHealthDisplay();
+      } else if (upgrade.type === 'attackSpeed') {
+        attackSpeedBonus += value;
+      } else if (upgrade.type === 'collectRange') {
+        collectRadius += collectRadius * value;
+      } else if (upgrade.type === 'attackDamage') {
+        attackDamage += attackDamage * value;
+      } else if (upgrade.type === 'expMultiplier') {
+        expMultiplier += value;
+      }
+      
+      showLevelUpChoice = false;
+      gamePaused = false;
+    }
+
+    function updateLevelDisplay() {
+      const levelValue = document.getElementById('levelValue');
+      const expBar = document.getElementById('expBar');
+      const textColor = window.elementSdk?.config?.text_color || defaultConfig.text_color;
+      
+      levelValue.textContent = playerLevel;
+      levelValue.style.color = textColor;
+      expBar.style.width = (playerExp / expToNextLevel * 100) + '%';
+    }
+
+    function updateSurvivalTime() {
+      const actualPlayTime = Date.now() - gameStartTime - pausedTime;
+      survivalSeconds = Math.floor(actualPlayTime / 1000);
+      const minutes = Math.floor(survivalSeconds / 60);
+      const seconds = survivalSeconds % 60;
+      
+      const survivalTimeElement = document.getElementById('survivalTime');
+      const label = window.elementSdk?.config?.survival_label || defaultConfig.survival_label;
+      survivalTimeElement.textContent = `${label} ${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    function resetGame() {
+      player.health = 100;
+      player.maxHealth = 100;
+      player.x = canvas.width / 2;
+      player.y = canvas.height / 2;
+      enemies.length = 0;
+      bullets.length = 0;
+      orbs.length = 0;
+      healthOrbs.length = 0;
+      lastDamageTime = 0;
+      gameStartTime = Date.now();
+      survivalSeconds = 0;
+      pausedTime = 0;
+      pauseStartTime = 0;
+      lastAutoShoot = 0;
+      enemySpawnInterval = 2000;
+      lastSpawnRateUpdate = Date.now();
+      playerLevel = 1;
+      playerExp = 0;
+      expToNextLevel = 10;
+      levelUpMessageTime = 0;
+      showLevelUpText = false;
+      gamePaused = false;
+      showLevelUpChoice = false;
+      collectRadius = 90;
+      attackSpeedBonus = 0;
+      attackDamage = 10;
+      expMultiplier = 1.0;
+      gameOver = false;
+      gameStarted = false;
+      showStartScreen = true;
+      finalSurvivalTime = '';
+      currentUpgradeOptions = [];
+      document.getElementById('gameUI').style.display = 'none';
+      document.getElementById('survivalTimeUI').style.display = 'none';
+      updateHealthDisplay();
+      updateSurvivalTime();
+      updateLevelDisplay();
+    }
+
+    function draw() {
+      ctx.fillStyle = window.elementSdk?.config?.background_color || defaultConfig.background_color;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (showStartScreen && !showTutorial) {
+        const textColor = window.elementSdk?.config?.text_color || defaultConfig.text_color;
+        const gameTitle = window.elementSdk?.config?.game_title || defaultConfig.game_title;
+        const playerColor = window.elementSdk?.config?.player_color || defaultConfig.player_color;
+        
+        // 배경 그라데이션 오버레이
+        const gradient = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, 0, canvas.width / 2, canvas.height / 2, canvas.width / 2);
+        gradient.addColorStop(0, 'rgba(0, 212, 255, 0.05)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // 장식용 원들 (배경)
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.arc(canvas.width / 2, canvas.height / 2 - 100, 150 + i * 40, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(0, 212, 255, ${0.1 - i * 0.03})`;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+        
+        // 게임 타이틀
+        ctx.fillStyle = playerColor;
+        ctx.font = 'bold 86px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = playerColor;
+        ctx.shadowBlur = 30;
+        ctx.fillText(gameTitle, canvas.width / 2, canvas.height / 2 - 140);
+        ctx.shadowBlur = 0;
+        
+        // 서브 타이틀
+        ctx.fillStyle = textColor;
+        ctx.globalAlpha = 0.8;
+        ctx.font = '24px Arial';
+        ctx.fillText('생존형 슈팅 게임', canvas.width / 2, canvas.height / 2 - 80);
+        ctx.globalAlpha = 1;
+        
+        // 시작 버튼
+        const buttonWidth = 280;
+        const buttonHeight = 75;
+        const buttonX = canvas.width / 2 - buttonWidth / 2;
+        const buttonY = canvas.height / 2 - 20;
+        
+        // 버튼 글로우 효과
+        ctx.shadowColor = playerColor;
+        ctx.shadowBlur = 25;
+        
+        // 버튼 그라데이션
+        const buttonGradient = ctx.createLinearGradient(buttonX, buttonY, buttonX, buttonY + buttonHeight);
+        buttonGradient.addColorStop(0, playerColor);
+        buttonGradient.addColorStop(1, adjustBrightness(playerColor, -30));
+        
+        ctx.fillStyle = buttonGradient;
+        roundRect(ctx, buttonX, buttonY, buttonWidth, buttonHeight, 15);
+        ctx.fill();
+        
+        ctx.strokeStyle = adjustBrightness(playerColor, 40);
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        
+        // 버튼 텍스트
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 34px Arial';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 5;
+        ctx.fillText('▶ 게임 시작', canvas.width / 2, buttonY + buttonHeight / 2);
+        ctx.shadowBlur = 0;
+        
+        // 게임 방법 보기 텍스트 (클릭 가능)
+        ctx.fillStyle = textColor;
+        ctx.globalAlpha = 0.7;
+        ctx.font = '18px Arial';
+        const tutorialTextY = canvas.height / 2 + 85;
+        ctx.fillText('📖 게임 방법 보기', canvas.width / 2, tutorialTextY);
+        
+        // 밑줄 효과 (짧게)
+        const underlineWidth = 140;
+        ctx.strokeStyle = textColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(canvas.width / 2 - underlineWidth / 2, tutorialTextY + 5);
+        ctx.lineTo(canvas.width / 2 + underlineWidth / 2, tutorialTextY + 5);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        
+        return;
+      }
+      
+      // 튜토리얼 화면
+      if (showTutorial) {
+        // 반투명 배경
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.95)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        const textColor = window.elementSdk?.config?.text_color || defaultConfig.text_color;
+        const playerColor = window.elementSdk?.config?.player_color || defaultConfig.player_color;
+        const enemyColor = window.elementSdk?.config?.enemy_color || defaultConfig.enemy_color;
+        const bulletColor = window.elementSdk?.config?.bullet_color || defaultConfig.bullet_color;
+        
+        // 페이지 1: 게임 소개
+        if (tutorialPage === 0) {
+          ctx.fillStyle = playerColor;
+          ctx.font = 'bold 48px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('🎮 게임 소개', canvas.width / 2, 100);
+          
+          ctx.fillStyle = textColor;
+          ctx.font = '24px Arial';
+          ctx.fillText('끝없이 몰려오는 적들을 물리치고', canvas.width / 2, 200);
+          ctx.fillText('최대한 오래 생존하는 게임입니다!', canvas.width / 2, 240);
+          
+          // 게임 요소 시연
+          const demoY = 320;
+          
+          // 플레이어
+          ctx.fillStyle = playerColor;
+          ctx.beginPath();
+          ctx.arc(canvas.width / 2 - 250, demoY, 20, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = textColor;
+          ctx.font = '18px Arial';
+          ctx.fillText('플레이어 (당신)', canvas.width / 2 - 250, demoY + 50);
+          
+          // 적
+          ctx.fillStyle = enemyColor;
+          ctx.beginPath();
+          ctx.arc(canvas.width / 2 - 80, demoY, 18, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = textColor;
+          ctx.fillText('적', canvas.width / 2 - 80, demoY + 50);
+          
+          // 경험치 구슬
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(canvas.width / 2 + 90, demoY, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#aaaaaa';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = textColor;
+          ctx.fillText('경험치 구슬', canvas.width / 2 + 90, demoY + 50);
+          
+          // 체력 회복 구슬
+          ctx.fillStyle = '#00ff00';
+          ctx.beginPath();
+          ctx.arc(canvas.width / 2 + 250, demoY, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#00aa00';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.fillStyle = textColor;
+          ctx.fillText('���력 회복 (5%)', canvas.width / 2 + 250, demoY + 50);
+          
+          ctx.font = '20px Arial';
+          ctx.fillStyle = textColor;
+          ctx.globalAlpha = 0.8;
+          ctx.fillText('시간이 지날수록 적이 더 많이 등장합니다', canvas.width / 2, 450);
+          ctx.fillText('레벨업하여 강해지세요!', canvas.width / 2, 490);
+          ctx.globalAlpha = 1;
+        }
+        
+        // 페이지 2: 조작법
+        else if (tutorialPage === 1) {
+          ctx.fillStyle = playerColor;
+          ctx.font = 'bold 48px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('⌨️ 조작법', canvas.width / 2, 100);
+          
+          const controlY = 200;
+          const spacing = 90;
+          
+          // WASD 조작
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+          ctx.fillRect(canvas.width / 2 - 300, controlY, 600, 70);
+          ctx.fillStyle = textColor;
+          ctx.font = 'bold 24px Arial';
+          ctx.textAlign = 'left';
+          ctx.fillText('🎮 이동', canvas.width / 2 - 280, controlY + 45);
+          ctx.font = '20px Arial';
+          ctx.fillText('W A S D  또는  ↑ ← ↓ →', canvas.width / 2 - 50, controlY + 45);
+          
+          // 자동 공격
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+          ctx.fillRect(canvas.width / 2 - 300, controlY + spacing, 600, 70);
+          ctx.fillStyle = textColor;
+          ctx.font = 'bold 24px Arial';
+          ctx.textAlign = 'left';
+          ctx.fillText('🔫 공격', canvas.width / 2 - 280, controlY + spacing + 45);
+          ctx.font = '20px Arial';
+          ctx.fillText('자동으로 가장 가까운 적 공격', canvas.width / 2 - 50, controlY + spacing + 45);
+          
+          // 레벨업
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+          ctx.fillRect(canvas.width / 2 - 300, controlY + spacing * 2, 600, 70);
+          ctx.fillStyle = textColor;
+          ctx.font = 'bold 24px Arial';
+          ctx.textAlign = 'left';
+          ctx.fillText('⭐ 레벨업', canvas.width / 2 - 280, controlY + spacing * 2 + 45);
+          ctx.font = '20px Arial';
+          ctx.fillText('1, 2, 3 키로 업그레이드 선택', canvas.width / 2 - 50, controlY + spacing * 2 + 45);
+          
+          // 시연 애니메이션
+          ctx.textAlign = 'center';
+          ctx.font = '18px Arial';
+          ctx.globalAlpha = 0.7;
+          ctx.fillText('💡 Tip: 적을 처치하면 경험치 구슬이 나옵니다', canvas.width / 2, controlY + spacing * 3 + 30);
+          ctx.globalAlpha = 1;
+        }
+        
+        // 페이지 3: 업그레이드
+        else if (tutorialPage === 2) {
+          ctx.fillStyle = playerColor;
+          ctx.font = 'bold 48px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('⭐ 업그레이드', canvas.width / 2, 100);
+          
+          ctx.fillStyle = textColor;
+          ctx.font = '22px Arial';
+          ctx.fillText('레벨업 시 3가지 중 하��를 선택��� 수 있습니다', canvas.width / 2, 180);
+          
+          const upgradeY = 250;
+          const upgradeSpacing = 80;
+          
+          const upgrades = [
+            { icon: '❤️', name: '체력', desc: '최대 체력과 현재 체력 증가', color: '#ff4444' },
+            { icon: '⚡', name: '공격 속도', desc: '더 빠르게 총알 발사', color: '#ffff00' },
+            { icon: '🗡', name: '공격력', desc: '총알의 데미지 증가', color: '#8a2be2' },
+            { icon: '🧲', name: '획득 범위', desc: '경험치 구슬 수집 범위 증가', color: '#00d4ff' },
+            { icon: '⭐', name: '경험치량', desc: '획득하는 경험치 증가 (희귀)', color: '#ffd700' }
+          ];
+          
+          ctx.font = '18px Arial';
+          ctx.textAlign = 'left';
+          
+          upgrades.forEach((upgrade, i) => {
+            const y = upgradeY + i * upgradeSpacing;
+            
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.fillRect(canvas.width / 2 - 320, y, 640, 60);
+            
+            ctx.font = '32px Arial';
+            ctx.fillText(upgrade.icon, canvas.width / 2 - 300, y + 40);
+            
+            ctx.fillStyle = upgrade.color;
+            ctx.font = 'bold 20px Arial';
+            ctx.fillText(upgrade.name, canvas.width / 2 - 250, y + 30);
+            
+            ctx.fillStyle = textColor;
+            ctx.globalAlpha = 0.8;
+            ctx.font = '16px Arial';
+            ctx.fillText(upgrade.desc, canvas.width / 2 - 250, y + 50);
+            ctx.globalAlpha = 1;
+          });
+        }
+        
+        // 페이지 인디케이터
+        const indicatorY = canvas.height - 150;
+        for (let i = 0; i < 3; i++) {
+          ctx.fillStyle = i === tutorialPage ? playerColor : 'rgba(255, 255, 255, 0.3)';
+          ctx.beginPath();
+          ctx.arc(canvas.width / 2 - 30 + i * 30, indicatorY, 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        
+        // 내비게이션 버튼
+        ctx.textAlign = 'center';
+        
+        // 마지막 페이지: 닫기 버튼만 표시
+        if (tutorialPage === 2) {
+          const closeButtonX = canvas.width / 2 - 100;
+          const closeButtonY = canvas.height - 100;
+          
+          ctx.fillStyle = playerColor;
+          ctx.fillRect(closeButtonX, closeButtonY, 200, 50);
+          ctx.strokeStyle = adjustBrightness(playerColor, 40);
+          ctx.lineWidth = 2;
+          ctx.strokeRect(closeButtonX, closeButtonY, 200, 50);
+          
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 18px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('✓ 이해했습니다!', closeButtonX + 100, closeButtonY + 32);
+        } else {
+          // 이전/다음 버튼 (마지막 페이지가 아닐 때만)
+          ctx.textAlign = 'center';
+          
+          // 이전 버튼
+          if (tutorialPage > 0) {
+            const prevButtonX = canvas.width / 2 - 170;
+            const prevButtonY = canvas.height - 100;
+            
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.fillRect(prevButtonX, prevButtonY, 150, 50);
+            ctx.strokeStyle = textColor;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(prevButtonX, prevButtonY, 150, 50);
+            
+            ctx.fillStyle = textColor;
+            ctx.font = 'bold 18px Arial';
+            ctx.fillText('← 이전', prevButtonX + 75, prevButtonY + 32);
+          }
+          
+          // 다음 버튼
+          if (tutorialPage < 2) {
+            const nextButtonX = canvas.width / 2 + 20;
+            const nextButtonY = canvas.height - 100;
+            
+            ctx.fillStyle = playerColor;
+            ctx.fillRect(nextButtonX, nextButtonY, 150, 50);
+            ctx.strokeStyle = adjustBrightness(playerColor, 40);
+            ctx.lineWidth = 2;
+            ctx.strokeRect(nextButtonX, nextButtonY, 150, 50);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 18px Arial';
+            ctx.fillText('다음 →', nextButtonX + 75, nextButtonY + 32);
+          }
+        }
+        
+        return;
+      }
+      
+    // 둥근 사각형 그리기 헬퍼 함수
+    function roundRect(ctx, x, y, width, height, radius) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
+    
+    // 색상 밝기 조절 헬퍼 함수
+    function adjustBrightness(hex, amount) {
+      const num = parseInt(hex.replace('#', ''), 16);
+      const r = Math.max(0, Math.min(255, (num >> 16) + amount));
+      const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00FF) + amount));
+      const b = Math.max(0, Math.min(255, (num & 0x0000FF) + amount));
+      return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+    }
+
+      if (!gameStarted) return;
+
+      const playerColor = window.elementSdk?.config?.player_color || defaultConfig.player_color;
+      
+      ctx.fillStyle = playerColor;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      const enemyColor = window.elementSdk?.config?.enemy_color || defaultConfig.enemy_color;
+      enemies.forEach(enemy => {
+        ctx.fillStyle = enemyColor;
+        ctx.beginPath();
+        ctx.arc(enemy.x, enemy.y, enemy.size, 0, Math.PI * 2);
+        ctx.fill();
+        
+        const barWidth = 30;
+        const barHeight = 4;
+        const barX = enemy.x - barWidth / 2;
+        const barY = enemy.y - enemy.size - 10;
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+        
+        const healthPercent = enemy.health / enemy.maxHealth;
+        ctx.fillStyle = healthPercent > 0.5 ? '#00ff00' : healthPercent > 0.25 ? '#ffff00' : '#ff0000';
+        ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
+      });
+
+      const bulletColor = window.elementSdk?.config?.bullet_color || defaultConfig.bullet_color;
+      ctx.fillStyle = bulletColor;
+      bullets.forEach(bullet => {
+        ctx.beginPath();
+        ctx.arc(bullet.x, bullet.y, bullet.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#aaaaaa';
+      ctx.lineWidth = 1;
+      orbs.forEach(orb => {
+        ctx.beginPath();
+        ctx.arc(orb.x, orb.y, orb.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+      
+      ctx.fillStyle = '#00ff00';
+      ctx.strokeStyle = '#00aa00';
+      ctx.lineWidth = 2;
+      healthOrbs.forEach(orb => {
+        ctx.beginPath();
+        ctx.arc(orb.x, orb.y, orb.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+
+      if (gameOver) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = '#ff4444';
+        ctx.font = 'bold 72px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        ctx.shadowBlur = 15;
+        ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 80);
+        ctx.shadowBlur = 0;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '32px Arial';
+        ctx.fillText(`생존 시간: ${finalSurvivalTime}`, canvas.width / 2, canvas.height / 2);
+        
+        const buttonWidth = 200;
+        const buttonHeight = 60;
+        const buttonX = canvas.width / 2 - buttonWidth / 2;
+        const buttonY = canvas.height / 2 + 60;
+        
+        ctx.fillStyle = 'rgba(0, 212, 255, 0.8)';
+        ctx.strokeStyle = '#00d4ff';
+        ctx.lineWidth = 3;
+        ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+        ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 24px Arial';
+        ctx.fillText('다시하기', canvas.width / 2, buttonY + buttonHeight / 2);
+      }
+      else if (showLevelUpChoice) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('레벨 업!', canvas.width / 2, canvas.height / 2 - 150);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px Arial';
+        ctx.fillText('업그레이드를 선택하세요', canvas.width / 2, canvas.height / 2 - 90);
+        
+        const boxWidth = 200;
+        const boxHeight = 120;
+        const boxY = canvas.height / 2 - 30;
+        const spacing = 20;
+        const totalWidth = boxWidth * 3 + spacing * 2;
+        const startX = canvas.width / 2 - totalWidth / 2;
+        
+        for (let i = 0; i < 3; i++) {
+          const upgrade = currentUpgradeOptions[i];
+          const boxX = startX + i * (boxWidth + spacing);
+          
+          ctx.fillStyle = upgrade.color;
+          ctx.strokeStyle = upgrade.borderColor;
+          ctx.lineWidth = 3;
+          ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+          ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+          
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 20px Arial';
+          ctx.fillText(`${upgrade.name} +${upgrade.value}%`, boxX + boxWidth / 2, boxY + 40);
+          ctx.font = '16px Arial';
+          ctx.fillText(`(${i + 1}번 키)`, boxX + boxWidth / 2, boxY + 70);
+        }
+      }
+      else if (gamePaused && gameStarted && !showLevelUpChoice) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        const textColor = window.elementSdk?.config?.text_color || defaultConfig.text_color;
+        ctx.fillStyle = textColor;
+        ctx.font = 'bold 64px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        ctx.shadowBlur = 10;
+        ctx.fillText('일시 정지', canvas.width / 2, canvas.height / 2);
+        ctx.shadowBlur = 0;
+        
+        ctx.font = '24px Arial';
+        ctx.globalAlpha = 0.8;
+        ctx.fillText('정지 버튼을 다시 눌러 계속하세요', canvas.width / 2, canvas.height / 2 + 60);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function gameLoop(timestamp) {
+      hideUIOnStartScreen();
+      
+      if (gameStarted && !gamePaused) {
+        // 실제 플레이 시간 기준으로 적 생성률 계산
+        const actualPlayTime = Date.now() - gameStartTime - pausedTime;
+        const currentPhase = Math.floor(actualPlayTime / 30000);
+        const enemiesPerWave = 2 + currentPhase;
+        enemySpawnInterval = 2000 / enemiesPerWave;
+        
+        if (timestamp - lastEnemySpawn > enemySpawnInterval) {
+          spawnEnemy();
+          lastEnemySpawn = timestamp;
+        }
+
+        const currentAutoShootInterval = autoShootInterval * (1 - attackSpeedBonus);
+        if (timestamp - lastAutoShoot > currentAutoShootInterval) {
+          autoShoot();
+          lastAutoShoot = timestamp;
+        }
+
+        updatePlayer();
+        updateEnemies();
+        updateBullets();
+        updateOrbs();
+        updateSurvivalTime();
+      }
+      
+      draw();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    async function onConfigChange(config) {
+      const gameTitle = document.getElementById('gameTitle');
+      const playerLabel = document.getElementById('playerLabel');
+      const healthLabel = document.getElementById('healthLabel');
+      const survivalTime = document.getElementById('survivalTime');
+      
+      gameTitle.textContent = config.game_title || defaultConfig.game_title;
+      playerLabel.textContent = config.player_label || defaultConfig.player_label;
+      healthLabel.textContent = config.health_label || defaultConfig.health_label;
+      
+      const textColor = config.text_color || defaultConfig.text_color;
+      gameTitle.style.color = textColor;
+      playerLabel.style.color = textColor;
+      healthLabel.style.color = textColor;
+      survivalTime.style.color = textColor;
+      document.getElementById('healthValue').style.color = textColor;
+      document.getElementById('levelValue').style.color = textColor;
+      
+      updateSurvivalTime();
+      updateLevelDisplay();
+    }
+
+    if (window.elementSdk) {
+      window.elementSdk.init({
+        defaultConfig,
+        onConfigChange,
+        mapToCapabilities: (config) => ({
+          recolorables: [
+            {
+              get: () => config.background_color || defaultConfig.background_color,
+              set: (value) => {
+                config.background_color = value;
+                window.elementSdk.setConfig({ background_color: value });
+              }
+            },
+            {
+              get: () => config.player_color || defaultConfig.player_color,
+              set: (value) => {
+                config.player_color = value;
+                window.elementSdk.setConfig({ player_color: value });
+              }
+            },
+            {
+              get: () => config.enemy_color || defaultConfig.enemy_color,
+              set: (value) => {
+                config.enemy_color = value;
+                window.elementSdk.setConfig({ enemy_color: value });
+              }
+            },
+            {
+              get: () => config.bullet_color || defaultConfig.bullet_color,
+              set: (value) => {
+                config.bullet_color = value;
+                window.elementSdk.setConfig({ bullet_color: value });
+              }
+            },
+            {
+              get: () => config.text_color || defaultConfig.text_color,
+              set: (value) => {
+                config.text_color = value;
+                window.elementSdk.setConfig({ text_color: value });
+              }
+            }
+          ],
+          borderables: [],
+          fontEditable: undefined,
+          fontSizeable: undefined
+        }),
+        mapToEditPanelValues: (config) => new Map([
+          ["game_title", config.game_title || defaultConfig.game_title],
+          ["player_label", config.player_label || defaultConfig.player_label],
+          ["health_label", config.health_label || defaultConfig.health_label],
+          ["survival_label", config.survival_label || defaultConfig.survival_label]
+        ])
+      });
+    }
+
+    requestAnimationFrame(gameLoop);
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9ba7d078a74f3085',t:'MTc2NzgzNDYxOC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
